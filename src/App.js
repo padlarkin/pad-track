@@ -11,7 +11,12 @@ import {
   collection,
 } from 'firebase/firestore';
 
-// Global variables provided by the Canvas environment
+// --- IMPORTANT: YOUR ALPHA VANTAGE API KEY ---
+const ALPHA_VANTAGE_API_KEY = 'ZF0JX9NOR8FA39W7';
+// --- END IMPORTANT ---
+
+// --- YOUR ACTUAL FIREBASE CONFIGURATION ---
+// This configuration is specific to your 'padtrack-4bb34' Firebase project.
 const firebaseConfig = {
   apiKey: "AIzaSyBKjzzPFrK850caNfbmUg75mfASWI9qYds",
   authDomain: "padtrack-4bb34.firebaseapp.com",
@@ -20,9 +25,15 @@ const firebaseConfig = {
   messagingSenderId: "993832125118",
   appId: "1:993832125118:web:02373aa87dd335463fd4ef"
 };
-// --- IMPORTANT: REPLACE WITH YOUR ACTUAL ALPHA VANTAGE API KEY ---
-const ALPHA_VANTAGE_API_KEY = 'ZF0JX9NOR8FA39W7';
-// --- END IMPORTANT ---
+// --- END FIREBASE CONFIGURATION ---
+
+// For local deployment, we'll use the Firebase Project ID as the app ID.
+// This ensures consistency with the Firestore path /artifacts/{appId}/users/{userId}/portfolios.
+const appId = firebaseConfig.projectId;
+
+// The __initial_auth_token is only provided by the Canvas environment, not needed for deployed apps.
+// The Firebase auth logic in useEffect handles anonymous sign-in directly.
+const initialAuthToken = null;
 
 
 // Main App component
@@ -59,8 +70,9 @@ export default function App() {
 
   // --- Firebase Initialization and Authentication ---
   useEffect(() => {
-    if (!firebaseConfig) {
-      setFirestoreError('Firebase configuration is missing.');
+    // Check if Firebase configuration is complete before initializing
+    if (!firebaseConfig.apiKey || !firebaseConfig.projectId || !firebaseConfig.appId) {
+      setFirestoreError('Firebase configuration is missing or incomplete. Please ensure all values are set.');
       setFirestoreLoading(false);
       return;
     }
@@ -78,8 +90,9 @@ export default function App() {
           setUserId(user.uid);
           setIsAuthReady(true);
         } else {
-          // Sign in anonymously if no user is found
+          // Sign in anonymously if no user is found and no initialAuthToken
           try {
+            // initialAuthToken is null for deployed apps, so it will proceed to signInAnonymously
             if (initialAuthToken) {
                 await signInWithCustomToken(firebaseAuth, initialAuthToken);
             } else {
@@ -93,18 +106,19 @@ export default function App() {
         setFirestoreLoading(false);
       });
 
-      return () => unsubscribe(); // Cleanup auth listener
+      return () => unsubscribe(); // Cleanup auth listener when component unmounts
     } catch (err) {
       console.error("Failed to initialize Firebase:", err);
-      setFirestoreError(`Firebase initialization failed: ${err.message}`);
+      setFirestoreError(`Firebase initialization failed: ${err.message}. Please check your Firebase config.`);
       setFirestoreLoading(false);
     }
-  }, []); // Run only once on component mount
+  }, []); // Empty dependency array means this effect runs once on mount
 
   // --- Firestore Portfolio Data Listener ---
   useEffect(() => {
+    // Only proceed if Firestore (db), Auth (userId), and Auth readiness are confirmed
     if (!db || !userId || !isAuthReady) {
-      return; // Wait for Firestore and Auth to be ready
+      return;
     }
 
     const portfolioCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/portfolios`);
@@ -115,13 +129,14 @@ export default function App() {
       }));
       setPortfolios(fetchedPortfolios);
 
-      // If no active portfolio or current active portfolio was deleted, set a new one
+      // Logic to set/create active portfolio
       if (fetchedPortfolios.length > 0) {
+        // If an active portfolio is set, ensure it still exists. If not, pick the first one.
         if (!activePortfolioId || !fetchedPortfolios.some(p => p.id === activePortfolioId)) {
-          setActivePortfolioId(fetchedPortfolios[0].id); // Set the first portfolio as active
+          setActivePortfolioId(fetchedPortfolios[0].id);
         }
       } else {
-        // If no portfolios exist, create a default one
+        // If no portfolios exist, automatically create a default one
         createDefaultPortfolio();
       }
     }, (err) => {
@@ -129,21 +144,21 @@ export default function App() {
       setFirestoreError(`Failed to load portfolios: ${err.message}`);
     });
 
-    return () => unsubscribe(); // Cleanup snapshot listener
-  }, [db, userId, isAuthReady, activePortfolioId]); // Re-run if db, userId, or auth state changes
+    return () => unsubscribe(); // Cleanup snapshot listener when component unmounts or dependencies change
+  }, [db, userId, isAuthReady, activePortfolioId]); // Re-run if db, userId, authReady state, or activePortfolioId changes
 
   // --- Portfolio Management Functions ---
   const createDefaultPortfolio = async () => {
-    if (!db || !userId) return;
+    if (!db || !userId) return; // Ensure Firestore and user are ready
     try {
       setFirestoreLoading(true);
       const portfolioCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/portfolios`);
       const newPortfolioRef = await addDoc(portfolioCollectionRef, {
         name: 'My First Portfolio',
         stocks: [], // Initialize with an empty array of stocks
-        createdAt: new Date().toISOString(), // Store as ISO string
+        createdAt: new Date().toISOString(), // Store as ISO string for sorting/consistency
       });
-      setActivePortfolioId(newPortfolioRef.id);
+      setActivePortfolioId(newPortfolioRef.id); // Set the newly created portfolio as active
       setFirestoreLoading(false);
     } catch (err) {
       console.error("Error creating default portfolio:", err);
@@ -159,16 +174,16 @@ export default function App() {
     }
     try {
       setFirestoreLoading(true);
-      setError('');
+      setError(''); // Clear previous errors
       const portfolioCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/portfolios`);
       const newPortfolioRef = await addDoc(portfolioCollectionRef, {
         name: newPortfolioName.trim(),
         stocks: [],
-        createdAt: new Date().toISOString(), // Store as ISO string
+        createdAt: new Date().toISOString(),
       });
-      setActivePortfolioId(newPortfolioRef.id);
-      setNewPortfolioName(''); // Clear input
-      setShowCreatePortfolioModal(false); // Close modal
+      setActivePortfolioId(newPortfolioRef.id); // Set the newly created portfolio as active
+      setNewPortfolioName(''); // Clear input field
+      setShowCreatePortfolioModal(false); // Close the modal
       setFirestoreLoading(false);
     } catch (err) {
       console.error("Error creating new portfolio:", err);
@@ -178,9 +193,10 @@ export default function App() {
   };
 
   const deletePortfolio = async (portfolioId) => {
-    if (!db || !userId || !portfolioId) return;
+    if (!db || !userId || !portfolioId) return; // Ensure Firestore, user, and portfolio ID are valid
+    // Prevent deleting the last remaining portfolio
     if (portfolios.length === 1 && portfolioId === activePortfolioId) {
-        setError("Cannot delete the last portfolio. Create a new one first.");
+        setError("Cannot delete the last portfolio. Please create a new one before deleting this.");
         return;
     }
     try {
@@ -197,64 +213,76 @@ export default function App() {
 
   // --- Stock Data Fetching with Alpha Vantage API ---
   const fetchStockData = async () => {
-    setStockData(null);
-    setError('');
-    setShowSuggestions(false);
+    setStockData(null); // Clear previous stock data display
+    setError('');       // Clear previous errors
+    setShowSuggestions(false); // Hide suggestions
 
     if (!stockSymbol.trim()) {
       setError('Please enter a stock symbol.');
       return;
     }
+    // Basic check if API key is still the placeholder
     if (!ALPHA_VANTAGE_API_KEY || ALPHA_VANTAGE_API_KEY === 'YOUR_ALPHA_VANTAGE_API_KEY') {
-        setError('Please set your Alpha Vantage API Key in the code.');
+        setError('Alpha Vantage API Key is missing. Please update it in the code.');
         return;
     }
 
-    setLoading(true);
+    setLoading(true); // Set loading state for stock data fetch
 
     try {
       const apiUrl = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${stockSymbol.toUpperCase()}&apikey=${ALPHA_VANTAGE_API_KEY}`;
       const response = await fetch(apiUrl);
       const data = await response.json();
 
+      // Handle Alpha Vantage specific error messages
       if (data["Error Message"]) {
         throw new Error(data["Error Message"]);
       }
-      if (data["Note"]) { // Alpha Vantage rate limit message
+      if (data["Note"]) { // This often indicates rate limit
           throw new Error(data["Note"]);
       }
 
-      const quote = data["Global Quote"];
+      const quote = data["Global Quote"]; // Access the 'Global Quote' object from the response
 
       if (quote && Object.keys(quote).length > 0) {
+        // Parse and format the fetched data
         const fetchedData = {
           symbol: quote["01. symbol"],
-          companyName: quote["01. symbol"], // Alpha Vantage Global Quote doesn't provide company name directly
+          companyName: match.name, // Use the name from the symbol search or a placeholder
           price: parseFloat(quote["05. price"]).toFixed(2),
-          // Fix: Ensure replace is called on string before parseFloat
           change: parseFloat(quote["09. change"]).toFixed(2),
-          changePercent: parseFloat(String(quote["10. change percent"]).replace('%', '')).toFixed(2), // Ensured string conversion
+          // Ensure replace is called on string before parseFloat
+          changePercent: parseFloat(quote["10. change percent"].replace('%', '')).toFixed(2),
           open: parseFloat(quote["02. open"]).toFixed(2),
           high: parseFloat(quote["03. high"]).toFixed(2),
           low: parseFloat(quote["04. low"]).toFixed(2),
           volume: parseInt(quote["06. volume"]).toLocaleString(),
           lastTradingDay: quote["07. latest trading day"],
-          // P/E Ratio and Dividend Yield are not directly available from GLOBAL_QUOTE
-          // Would require another API call (e.g., OVERVIEW endpoint) for real data
-          peRatio: (Math.random() * 30 + 10).toFixed(2), // Dummy
-          dividendYield: (Math.random() * 0.05).toFixed(4), // Dummy
+          // P/E Ratio and Dividend Yield are not directly available from GLOBAL_QUOTE.
+          // For real data, you'd need the OVERVIEW endpoint. Keeping as dummy for now.
+          peRatio: (Math.random() * 30 + 10).toFixed(2),
+          dividendYield: (Math.random() * 0.05).toFixed(4),
           lastUpdated: new Date().toLocaleString()
         };
+        // Attempt to find the company name from suggestions if possible
+        const companyMatch = suggestions.find(s => s.symbol === fetchedData.symbol);
+        if (companyMatch) {
+            fetchedData.companyName = companyMatch.name;
+        } else {
+            // Fallback if no match found (e.g., direct symbol input without suggestions)
+            fetchedData.companyName = `${fetchedData.symbol} Inc.`;
+        }
+
         setStockData(fetchedData);
       } else {
-        setError(`No data found for symbol: ${stockSymbol.toUpperCase()}. Please check the symbol.`);
+        setError(`No live data found for symbol: ${stockSymbol.toUpperCase()}. Please check the symbol or try again later.`);
       }
 
     } catch (err) {
       console.error('Error fetching stock data:', err);
-      setError(`Could not fetch data: ${err.message || 'Unknown error'}. Please try again, or check your API key/rate limits.`);
+      setError(`Could not fetch data: ${err.message || 'Unknown API error'}. Please try again, or check your API key/rate limits.`);
     } finally {
-      setLoading(false);
+      setLoading(false); // End loading state
     }
   };
 
@@ -265,8 +293,8 @@ export default function App() {
       setShowSuggestions(false);
       return;
     }
+    // Don't error out on suggestions if API key is missing, just don't fetch from API
     if (!ALPHA_VANTAGE_API_KEY || ALPHA_VANTAGE_API_KEY === 'YOUR_ALPHA_VANTAGE_API_KEY') {
-        // Don't error out on suggestions if API key is missing, just don't fetch
         setSuggestions([]);
         setShowSuggestions(false);
         return;
@@ -281,9 +309,8 @@ export default function App() {
         throw new Error(data["Error Message"]);
       }
       if (data["Note"]) { // Alpha Vantage rate limit message
-          // console.warn("Alpha Vantage Note for suggestions:", data["Note"]);
-          // We can still show old suggestions or just clear them
-          setSuggestions([]);
+          // console.warn("Alpha Vantage Note for suggestions:", data["Note"]); // Log warning but don't stop flow
+          setSuggestions([]); // Clear suggestions if rate limited
           setShowSuggestions(false);
           return;
       }
@@ -302,36 +329,38 @@ export default function App() {
 
     } catch (err) {
       console.error('Error fetching suggestions:', err);
-      // set error state or just log for suggestions as it's less critical
+      // For suggestions, just clear them on error, not critical to stop app
       setSuggestions([]);
       setShowSuggestions(false);
     }
   };
 
-  // Handle input change for autosuggestion
+  // Debounce logic for input change to limit API calls for suggestions
   const handleInputChange = (e) => {
     const value = e.target.value;
     setStockSymbol(value);
 
+    // Clear any existing debounce timer
     if (debounceTimeoutRef.current) {
       clearTimeout(debounceTimeoutRef.current);
     }
 
+    // Set a new timer to call fetchSuggestions after a delay
     debounceTimeoutRef.current = setTimeout(() => {
       fetchSuggestions(value);
-    }, 300);
+    }, 300); // 300ms debounce
   };
 
-  // Handle clicking on a suggestion (unchanged)
+  // Handle clicking on a suggestion item from the dropdown
   const handleSuggestionClick = (symbol) => {
-    setStockSymbol(symbol);
-    setSuggestions([]);
-    setShowSuggestions(false);
-    // Optionally trigger fetch data immediately after selecting a suggestion
-    // fetchStockData(); // Uncomment if you want immediate fetch
+    setStockSymbol(symbol); // Populate the input with the selected symbol
+    setSuggestions([]); // Clear the suggestion list
+    setShowSuggestions(false); // Hide the suggestion dropdown
+    // Optionally, automatically fetch stock data after selection:
+    // fetchStockData();
   };
 
-  // Handle clicking outside the input and suggestions to close them (unchanged)
+  // Close suggestions when clicking outside the input/suggestions area
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (inputContainerRef.current && !inputContainerRef.current.contains(event.target)) {
@@ -341,34 +370,37 @@ export default function App() {
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('mousedown', handleClickOutside); // Cleanup event listener
     };
-  }, []);
+  }, []); // Empty dependency array means this effect runs once on mount
 
-  // Function to add the current stock to the active portfolio
+
+  // Function to add the currently displayed stock data to the active portfolio in Firestore
   const addToPortfolio = async () => {
     if (!stockData || !db || !userId || !activePortfolioId) {
-      setError("Please fetch stock data and ensure a portfolio is selected.");
+      setError("Please fetch stock data and ensure an active portfolio is selected.");
       return;
     }
 
     try {
-      setFirestoreLoading(true);
-      setError('');
-      const activePortfolio = portfolios.find(p => p.id === activePortfolioId);
+      setFirestoreLoading(true); // Indicate Firestore operation is ongoing
+      setError(''); // Clear previous errors
+      const activePortfolio = portfolios.find(p => p.id === activePortfolioId); // Find the current active portfolio object
       if (activePortfolio) {
+        // Check if the stock is already in the current portfolio to prevent duplicates
         const isAlreadyInPortfolio = activePortfolio.stocks.some(item => item.symbol === stockData.symbol);
         if (!isAlreadyInPortfolio) {
           const portfolioDocRef = doc(db, `artifacts/${appId}/users/${userId}/portfolios`, activePortfolioId);
+          // Update the Firestore document with the new stock added to the 'stocks' array
           await setDoc(portfolioDocRef, {
-            ...activePortfolio,
-            stocks: [...activePortfolio.stocks, stockData]
-          }, { merge: true });
+            ...activePortfolio, // Spread existing fields to retain them
+            stocks: [...activePortfolio.stocks, stockData] // Add the new stock to the array
+          }, { merge: true }); // Use merge: true to only update the 'stocks' field and not overwrite the entire document
         } else {
-          setError(`${stockData.symbol} is already in the active portfolio.`);
+          setError(`${stockData.symbol} is already in the active portfolio.`); // Inform user about duplicate
         }
       }
-      setFirestoreLoading(false);
+      setFirestoreLoading(false); // End Firestore loading
     } catch (err) {
       console.error("Error adding stock to portfolio:", err);
       setFirestoreError(`Failed to add stock to portfolio: ${err.message}`);
@@ -376,23 +408,25 @@ export default function App() {
     }
   };
 
-  // Function to remove a stock from the active portfolio
+  // Function to remove a stock from the active portfolio in Firestore
   const removeFromPortfolio = async (symbolToRemove) => {
-    if (!db || !userId || !activePortfolioId) return;
+    if (!db || !userId || !activePortfolioId) return; // Ensure Firestore, user, and portfolio are ready
 
     try {
-      setFirestoreLoading(true);
-      setError('');
-      const activePortfolio = portfolios.find(p => p.id === activePortfolioId);
+      setFirestoreLoading(true); // Indicate Firestore operation is ongoing
+      setError(''); // Clear previous errors
+      const activePortfolio = portfolios.find(p => p.id === activePortfolioId); // Find the current active portfolio
       if (activePortfolio) {
+        // Filter out the stock to be removed from the stocks array
         const updatedStocks = activePortfolio.stocks.filter(stock => stock.symbol !== symbolToRemove);
         const portfolioDocRef = doc(db, `artifacts/${appId}/users/${userId}/portfolios`, activePortfolioId);
+        // Update the Firestore document with the modified stocks array
         await setDoc(portfolioDocRef, {
           ...activePortfolio,
           stocks: updatedStocks
         }, { merge: true });
       }
-      setFirestoreLoading(false);
+      setFirestoreLoading(false); // End Firestore loading
     } catch (err) {
       console.error("Error removing stock from portfolio:", err);
       setFirestoreError(`Failed to remove stock: ${err.message}`);
@@ -400,50 +434,52 @@ export default function App() {
     }
   };
 
-  // --- Drag and Drop Handlers ---
+  // --- Drag and Drop Handlers for reordering portfolio stocks ---
   const handleDragStart = (e, stock) => {
-    setDraggedItem(stock);
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', stock.symbol);
+    setDraggedItem(stock); // Store the item being dragged in state
+    e.dataTransfer.effectAllowed = 'move'; // Visual feedback for move operation
+    e.dataTransfer.setData('text/plain', stock.symbol); // Pass data for the drop target
   };
 
   const handleDragOver = (e) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    e.preventDefault(); // Prevent default to allow drop
+    e.dataTransfer.dropEffect = 'move'; // Visual feedback for move operation
   };
 
   const handleDrop = async (e, targetStock) => {
     e.preventDefault();
     if (!draggedItem || draggedItem.symbol === targetStock.symbol) {
-      setDraggedItem(null);
+      setDraggedItem(null); // Clear dragged item if no valid drag or dropping on self
       return;
     }
 
     const currentPortfolio = portfolios.find(p => p.id === activePortfolioId);
     if (!currentPortfolio) return;
 
-    const updatedStocks = [...currentPortfolio.stocks];
+    const updatedStocks = [...currentPortfolio.stocks]; // Create a mutable copy of stocks array
     const draggedIndex = updatedStocks.findIndex(stock => stock.symbol === draggedItem.symbol);
     const targetIndex = updatedStocks.findIndex(stock => stock.symbol === targetStock.symbol);
 
     if (draggedIndex === -1 || targetIndex === -1) {
-      setDraggedItem(null);
+      setDraggedItem(null); // Clear if indices are invalid
       return;
     }
 
-    const [removed] = updatedStocks.splice(draggedIndex, 1);
-    updatedStocks.splice(targetIndex, 0, removed);
+    // Perform the reordering logic:
+    const [removed] = updatedStocks.splice(draggedIndex, 1); // Remove the dragged item
+    updatedStocks.splice(targetIndex, 0, removed); // Insert it at the target position
 
+    // Update Firestore with the new order
     try {
       setFirestoreLoading(true);
       setError('');
       const portfolioDocRef = doc(db, `artifacts/${appId}/users/${userId}/portfolios`, activePortfolioId);
       await setDoc(portfolioDocRef, {
-        ...currentPortfolio,
-        stocks: updatedStocks
+        ...currentPortfolio, // Keep other portfolio properties
+        stocks: updatedStocks // Update with the reordered array
       }, { merge: true });
       setFirestoreLoading(false);
-      setDraggedItem(null);
+      setDraggedItem(null); // Clear dragged item after successful update
     } catch (err) {
       console.error("Error reordering portfolio:", err);
       setFirestoreError(`Failed to reorder portfolio: ${err.message}`);
@@ -452,15 +488,15 @@ export default function App() {
   };
 
   const handleDragEnd = () => {
-    setDraggedItem(null);
+    setDraggedItem(null); // Clear dragged item state regardless of drop success
   };
 
-  // Get the active portfolio's stocks for display
+  // Derive the stocks for the currently active portfolio for display
   const activePortfolioStocks = activePortfolioId
     ? portfolios.find(p => p.id === activePortfolioId)?.stocks || []
     : [];
 
-  // Loading and Error states for Firebase
+  // --- Conditional Rendering for Loading and Error States ---
   if (firestoreLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-indigo-600 to-purple-800 text-white flex flex-col items-center justify-center font-sans">
@@ -487,7 +523,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-600 to-purple-800 text-white p-4 sm:p-6 flex flex-col items-center justify-center font-sans">
       <header className="w-full max-w-lg mb-4 text-center">
-        <h1 className="text-4xl font-extrabold mb-2 text-shadow-lg">Pad Trac</h1>
+        <h1 className="text-4xl font-extrabold mb-2 text-shadow-lg">Stock Data Fetcher</h1>
         <p className="text-indigo-200 text-sm">
           Your User ID: <span className="font-mono text-xs break-all bg-indigo-500 bg-opacity-30 rounded px-1">{userId || 'N/A'}</span>
         </p>
@@ -499,7 +535,7 @@ export default function App() {
       </header>
 
       <div className="w-full max-w-md bg-white p-6 rounded-xl shadow-2xl space-y-6 mb-8">
-        {/* Portfolio Management */}
+        {/* Portfolio Management Section */}
         <div className="flex flex-col gap-3">
             <h2 className="text-2xl font-bold text-indigo-700">Manage Portfolios</h2>
             <div className="flex flex-col sm:flex-row gap-2 items-center">
@@ -507,6 +543,7 @@ export default function App() {
                     className="flex-grow p-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-gray-800 text-lg shadow-sm"
                     value={activePortfolioId || ''}
                     onChange={(e) => setActivePortfolioId(e.target.value)}
+                    disabled={firestoreLoading} // Disable while Firestore operations are ongoing
                 >
                     {portfolios.map(p => (
                         <option key={p.id} value={p.id}>{p.name}</option>
@@ -516,6 +553,7 @@ export default function App() {
                 <button
                     onClick={() => setShowCreatePortfolioModal(true)}
                     className="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transform transition duration-300 ease-in-out active:scale-95 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 text-sm"
+                    disabled={firestoreLoading}
                 >
                     New Portfolio
                 </button>
@@ -523,6 +561,7 @@ export default function App() {
                     <button
                         onClick={() => deletePortfolio(activePortfolioId)}
                         className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transform transition duration-300 ease-in-out active:scale-95 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 text-sm"
+                        disabled={firestoreLoading || portfolios.length === 1} // Disable if only one portfolio left
                     >
                         Delete Active
                     </button>
@@ -550,12 +589,14 @@ export default function App() {
                         <button
                             onClick={() => setShowCreatePortfolioModal(false)}
                             className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out"
+                            disabled={firestoreLoading}
                         >
                             Cancel
                         </button>
                         <button
                             onClick={createNewPortfolio}
                             className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition duration-300 ease-in-out"
+                            disabled={firestoreLoading}
                         >
                             Create
                         </button>
@@ -564,7 +605,7 @@ export default function App() {
             </div>
         )}
 
-        {/* Stock Search Input */}
+        {/* Stock Search Input Section */}
         <div className="flex flex-col sm:flex-row gap-4 relative" ref={inputContainerRef}>
           <input
             type="text"
@@ -578,6 +619,7 @@ export default function App() {
                 }
             }}
             onFocus={() => {
+                // Show suggestions on focus if there's text and suggestions available
                 if (stockSymbol.length > 0 && suggestions.length > 0) {
                     setShowSuggestions(true);
                 }
@@ -586,7 +628,7 @@ export default function App() {
           <button
             onClick={fetchStockData}
             className="bg-indigo-700 hover:bg-indigo-800 text-white font-bold py-3 px-6 rounded-lg shadow-lg transform transition duration-300 ease-in-out active:scale-95 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-            disabled={loading}
+            disabled={loading} // Disable if stock data is currently being fetched
           >
             {loading ? (
               <svg className="animate-spin h-5 w-5 text-white inline-block mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -598,6 +640,7 @@ export default function App() {
             )}
           </button>
 
+          {/* Autosuggestion List */}
           {showSuggestions && suggestions.length > 0 && (
             <ul className="suggestions-list absolute z-10 left-0 right-0 w-full bg-white border border-gray-300 rounded-lg shadow-lg top-[calc(100%+0.5rem)] max-h-60 overflow-y-auto text-gray-800">
               {suggestions.map((stock) => (
@@ -613,12 +656,14 @@ export default function App() {
           )}
         </div>
 
+        {/* General Error Message Display */}
         {error && (
           <p className="text-red-500 bg-red-100 p-3 rounded-lg border border-red-200 text-center shadow-md">
             {error}
           </p>
         )}
 
+        {/* Display Fetched Stock Data */}
         {stockData && (
           <div className="bg-gradient-to-r from-gray-50 to-gray-100 p-6 rounded-xl shadow-lg border border-gray-200 text-gray-800 space-y-4">
             <h2 className="text-3xl font-bold text-indigo-700 mb-2">{stockData.companyName}</h2>
@@ -639,18 +684,19 @@ export default function App() {
             <button
               onClick={addToPortfolio}
               className="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transform transition duration-300 ease-in-out active:scale-95 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 flex items-center justify-center gap-2"
-              disabled={!activePortfolioId || firestoreLoading}
+              disabled={!activePortfolioId || firestoreLoading} // Disable if no active portfolio or Firestore is busy
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
               </svg>
               Add to Active Portfolio
             </button>
-            <p className="text-sm text-gray-600 italic mt-4">Data is from Alpha Vantage. P/E and Dividend Yield are mock.</p>
+            <p className="text-sm text-gray-600 italic mt-4">Data is from Alpha Vantage. P/E and Dividend Yield are mock as they require another API call.</p>
           </div>
         )}
       </div>
 
+      {/* My Portfolio Section */}
       {activePortfolioStocks.length > 0 && (
         <div className="w-full max-w-md bg-white p-6 rounded-xl shadow-2xl space-y-4 mt-8">
           <h2 className="text-3xl font-bold text-indigo-700 mb-4 text-center">
@@ -660,11 +706,12 @@ export default function App() {
             {activePortfolioStocks.map((stock) => (
               <div
                 key={stock.symbol}
-                draggable="true" // Make the item draggable
-                onDragStart={(e) => handleDragStart(e, stock)}
-                onDragOver={handleDragOver}
-                onDrop={(e) => handleDrop(e, stock)}
-                onDragEnd={handleDragEnd}
+                draggable="true" // Makes this element draggable
+                onDragStart={(e) => handleDragStart(e, stock)} // Event when drag starts
+                onDragOver={handleDragOver} // Event when dragged item is over this
+                onDrop={(e) => handleDrop(e, stock)} // Event when dragged item is dropped on this
+                onDragEnd={handleDragEnd} // Event when drag ends
+                // Visual feedback for dragged item
                 className={`bg-gray-50 p-4 rounded-lg shadow-md border border-gray-200 text-gray-800 flex justify-between items-center cursor-grab ${draggedItem && draggedItem.symbol === stock.symbol ? 'opacity-50 border-blue-500 border-2' : ''}`}
               >
                 <div>
@@ -678,7 +725,7 @@ export default function App() {
                 <button
                   onClick={() => removeFromPortfolio(stock.symbol)}
                   className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transform transition duration-300 ease-in-out active:scale-95 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2 text-sm"
-                  disabled={firestoreLoading}
+                  disabled={firestoreLoading} // Disable while Firestore operations are ongoing
                 >
                   Remove
                 </button>
@@ -688,8 +735,9 @@ export default function App() {
         </div>
       )}
 
+      {/* Tailwind CSS and Custom Styles */}
       <style jsx>{`
-        /* Custom styles for text shadow */
+        /* Custom styles for text shadow on header */
         .text-shadow-lg {
           text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
         }
