@@ -1,0 +1,15 @@
+{
+  "files": {
+    "main.css": "/pad-track/static/css/main.e6c13ad2.css",
+    "main.js": "/pad-track/static/js/main.0e82679e.js",
+    "static/js/453.1dcca1e2.chunk.js": "/pad-track/static/js/453.1dcca1e2.chunk.js",
+    "index.html": "/pad-track/index.html",
+    "main.e6c13ad2.css.map": "/pad-track/static/css/main.e6c13ad2.css.map",
+    "main.0e82679e.js.map": "/pad-track/static/js/main.0e82679e.js.map",
+    "453.1dcca1e2.chunk.js.map": "/pad-track/static/js/453.1dcca1e2.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.e6c13ad2.css",
+    "static/js/main.0e82679e.js"
+  ]
+}
