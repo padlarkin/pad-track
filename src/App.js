@@ -12,10 +12,14 @@ import {
 } from 'firebase/firestore';
 
 // Global variables provided by the Canvas environment
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
+const firebaseConfig = {
+  apiKey: "AIzaSyBKjzzPFrK850caNfbmUg75mfASWI9qYds",
+  authDomain: "padtrack-4bb34.firebaseapp.com",
+  projectId: "padtrack-4bb34",
+  storageBucket: "padtrack-4bb34.firebasestorage.app",
+  messagingSenderId: "993832125118",
+  appId: "1:993832125118:web:02373aa87dd335463fd4ef"
+};
 // --- IMPORTANT: REPLACE WITH YOUR ACTUAL ALPHA VANTAGE API KEY ---
 const ALPHA_VANTAGE_API_KEY = 'ZF0JX9NOR8FA39W7';
 // --- END IMPORTANT ---
